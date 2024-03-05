@@ -1,0 +1,100 @@
+---
+title: "Airbnb_Paris"
+format: pdf
+editor: visual
+---
+```{r}
+# Load necessary libraries
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+library(naniar)
+
+# Download and read the dataset
+url <- "http://data.insideairbnb.com/france/ile-de-france/paris/2023-12-12/data/listings.csv.gz"
+airbnb_data <- read_csv(file = url, guess_max = 20000)
+
+# Save a local copy of the data
+write_csv(airbnb_data, "listings.csv")
+
+# Select relevant variables
+airbnb_data_selected <- airbnb_data %>%
+  select(
+    host_id,
+    host_response_time,
+    host_is_superhost,
+    host_total_listings_count,
+    neighbourhood_cleansed,
+    bathrooms,
+    bedrooms,
+    price,
+    number_of_reviews,
+    review_scores_rating,
+    review_scores_accuracy,
+    review_scores_value
+  )
+
+# Save a smaller, selected dataset for easier handling
+write_parquet(airbnb_data_selected, "2023-12-12-paris-airbnblistings-select_variables.parquet")
+
+# Convert price from character to numeric, removing "$" and ","
+airbnb_data_selected <- airbnb_data_selected %>%
+  mutate(
+    price = str_remove_all(price, "[\\$,]"),
+    price = as.integer(price)
+  )
+
+# Visualize the distribution of prices
+ggplot(airbnb_data_selected, aes(x = price)) +
+  geom_histogram(binwidth = 10) +
+  theme_classic() +
+  labs(x = "Price per night", y = "Number of properties")
+
+# Filter to focus on listings with prices under $1000
+airbnb_data_less_1000 <- airbnb_data_selected %>%
+  filter(price < 1000)
+
+# Deal with missing superhost information
+airbnb_data_no_superhost_nas <- airbnb_data_less_1000 %>%
+  filter(!is.na(host_is_superhost)) %>%
+  mutate(host_is_superhost_binary = as.numeric(host_is_superhost))
+
+# Visualize review scores
+ggplot(airbnb_data_no_superhost_nas, aes(x = review_scores_rating)) +
+  geom_bar() +
+  theme_classic() +
+  labs(x = "Review scores rating", y = "Number of properties")
+
+# Remove listings without reviews
+airbnb_data_has_reviews <- airbnb_data_no_superhost_nas %>%
+  filter(!is.na(review_scores_rating))
+
+# Recode host response times and convert to factor
+airbnb_data_has_reviews <- airbnb_data_has_reviews %>%
+  mutate(
+    host_response_time = if_else(host_response_time == "N/A", NA_character_, host_response_time),
+    host_response_time = factor(host_response_time)
+  )
+
+# Remove listings with missing response times
+airbnb_data_selected <- airbnb_data_has_reviews %>%
+  filter(!is.na(host_response_time))
+
+# Logistic regression on superhost status
+logistic_reg_superhost_response_review <- glm(
+  host_is_superhost ~ host_response_time + review_scores_rating,
+  data = airbnb_data_selected,
+  family = binomial
+)
+
+# Use modelsummary or your preferred method to examine the regression results
+# This requires installing and loading the modelsummary package
+# install.packages("modelsummary")
+# library(modelsummary)
+# modelsummary(logistic_reg_superhost_response_review)
+
+# Save the final analysis dataset
+write_parquet(airbnb_data_selected, "2023-12-12-paris-airbnblistings-analysis_dataset.parquet")
+```
